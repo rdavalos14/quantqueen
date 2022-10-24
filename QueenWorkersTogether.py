@@ -36,9 +36,12 @@ from scipy import stats
 import hashlib
 import json
 from collections import deque
-from QueenHive import init_pollen_dbs, read_queensmind, speedybee, return_timestamp_string, pollen_story, ReadPickleData, PickleData, return_api_keys, return_bars_list, refresh_account_info, return_bars, rebuild_timeframe_bars, init_index_ticker, print_line_of_error, return_index_tickers
+from QueenHive import init_QUEEN, init_pollen_dbs, read_queensmind, speedybee, return_timestamp_string, pollen_story, ReadPickleData, PickleData, return_api_keys, return_bars_list, refresh_account_info, return_bars, rebuild_timeframe_bars, init_index_ticker, print_line_of_error, return_index_tickers
 from QueenHive import return_macd, return_VWAP, return_RSI, return_sma_slope
 import argparse
+import aiohttp
+import asyncio
+from itertools import islice
 
 # FEAT List
 # rebuild minute bar with high and lows, store current minute bar in QUEEN, reproduce every minute
@@ -93,50 +96,40 @@ else:
 
 # Macd Settings
 # MACD_12_26_9 = {'fast': 12, 'slow': 26, 'smooth': 9}
-QUEEN = { # The Queens Mind
-    'command_conscience': {'memory': {'trigger_stopped': [], 'trigger_sell_stopped': [], 'orders_completed': []}, 
-                            'orders': { 'requests': [],
-                                        'submitted': [],
-                                        'running': [],
-                                        'running_close': []}
-                                        }, # ONLY for the Kings Eyes
-        'heartbeat': {}, # ticker info ... change name
-        'kings_order_rules': {},
-    # Worker Bees
-    queens_chess_piece: {
-    'conscience': {'STORY_bee': {},'KNIGHTSWORD': {}, 'ANGEL_bee': {}},
-    'pollenstory': {}, # latest story of dataframes castle and bishop
-    'pollencharts': {}, # latest chart rebuild
-    'pollencharts_nectar': {}, # latest chart rebuild with indicators
-    'pollenstory_info': {}, # Misc Info,
-    'client': {},
-    'heartbeat': {'cycle_time': deque([], 89)},
-    'last_modified' : datetime.datetime.now(),
-    'triggerBee_frequency' : {},
+def init_QUEENWORKER(queens_chess_piece):
+
+    QUEEN = { # The Queens Mind
+        'command_conscience': {'memory': {'trigger_stopped': [], 'trigger_sell_stopped': [], 'orders_completed': []}, 
+                                'orders': { 'requests': [],
+                                            'submitted': [],
+                                            'running': [],
+                                            'running_close': []}
+                                            }, # ONLY for the Kings Eyes
+            'heartbeat': {}, # ticker info ... change name
+            'kings_order_rules': {},
+        # Worker Bees
+        queens_chess_piece: {
+        'conscience': {'STORY_bee': {},'KNIGHTSWORD': {}, 'ANGEL_bee': {}},
+        'pollenstory': {}, # latest story of dataframes castle and bishop
+        'pollencharts': {}, # latest chart rebuild
+        'pollencharts_nectar': {}, # latest chart rebuild with indicators
+        'pollenstory_info': {}, # Misc Info,
+        'client': {},
+        'heartbeat': {'cycle_time': deque([], 89)},
+        'last_modified' : datetime.datetime.now(),
+        'triggerBee_frequency' : {},
+        }
     }
-}
+
+    return QUEEN
 
 
+QUEEN = init_QUEENWORKER(queens_chess_piece)
 
 if queens_chess_piece.lower() not in ['castle', 'knight', 'bishop', 'workerbee']:
     print("wrong chess move")
     sys.exit()
 
-
-# Client Tickers
-src_root, db_dirname = os.path.split(db_root)
-client_ticker_file = os.path.join(src_root, 'client_tickers.csv')
-df_client = pd.read_csv(client_ticker_file, dtype=str)
-df_client_f = df_client[df_client['status']=='active'].copy()
-client_symbols = df_client_f.tickers.to_list()
-client_symbols_castle = ['SPY', 'QQQ']
-client_symbols_bishop = ['AAPL', 'GOOG', 'META', 'SOFI', 'HD']
-client_market_movers = ['AAPL', 'TSLA', 'GOOG', 'META']
-
-QUEEN['heartbeat']['main_indexes'] = {
-    'SPY': {'long3X': 'SPXL', 'inverse': 'SH', 'inverse2X': 'SDS', 'inverse3X': 'SPXU'},
-    'QQQ': {'long3X': 'TQQQ', 'inverse': 'PSQ', 'inverse2X': 'QID', 'inverse3X': 'SQQQ'}
-    } 
 
 
 """ Keys """
@@ -180,18 +173,6 @@ exclude_conditions = [
 ] # 'U'
 
 """# Main Arguments """
-num = {1: .15, 2: .25, 3: .40, 4: .60, 5: .8}
-client_num_LT = 1
-client_num_ST = 3
-client_days1yrmac_input = 233 # Tier 1
-client_daysT2Mac_input = 5 # Tier 2
-client_daysT3Mac_input = 233 # Tier 3
-
-"""# Customer Setup """
-Long_Term_Client_Input = num[client_num_LT]
-MidDayLag_Alloc = num[client_num_ST]
-DayRiskAlloc = 1 - (Long_Term_Client_Input + MidDayLag_Alloc)
-
 
 index_list = [
     'DJA', 'DJI', 'DJT', 'DJUSCL', 'DJU',
@@ -208,18 +189,6 @@ if prod: # Return Ticker and Acct Info
         os.mkdir(index_ticker_db)
         print("Ticker Index db Initiated")
         init_index_ticker(index_list, db_root, init=True)
-    """Account Infomation """
-    acc_info = refresh_account_info(api)
-    # Main Alloc
-    portvalue_LT_iniate = acc_info[1]['portfolio_value'] * Long_Term_Client_Input
-    portvalue_MID_iniate = acc_info[1]['portfolio_value'] * MidDayLag_Alloc
-    portvalue_BeeHunter_iniate = acc_info[1]['portfolio_value'] * DayRiskAlloc
-
-    # check alloc correct
-
-    if round(portvalue_BeeHunter_iniate + portvalue_MID_iniate + portvalue_LT_iniate - acc_info[1]['portfolio_value'],4) > 1:
-        print("break in Rev Alloc")
-        sys.exit()
 
     """ Return Index Charts & Data for All Tickers Wanted"""
     """ Return Tickers of SP500 & Nasdaq / Other Tickers"""
@@ -254,156 +223,147 @@ if prod: # Return Ticker and Acct Info
     not_avail_in_alpaca =[i for i in main_symbols_full_list if i not in alpaca_symbols_dict]
     main_symbols_full_list = [i for i in main_symbols_full_list if i in alpaca_symbols_dict]
 
-    # client_symbols = ['SPY', 'SPDN', 'SPXU', 'SPXL', 'TQQQ', 'SQQQ', 'AAPL', 'GOOG', 'VIX'] # Should be from CSV file OR UI List from app
-    LongTerm_symbols = ['AAPL', 'GOOGL', 'MFST', 'VIT', 'HD', 'WMT', 'MOOD', 'LIT', 'SPXL', 'TQQQ']
-    # BeeHunter = {
-    #     'LongX3': {'TQQQ': 'TQQQ', 'SPXL': 'SPXL'},
-    #     'ShortX3': {'SQQQ':'SQQQ', 'SPXU': 'SPXU'},
-    #     'Long':  {'SPY': 'SPY', 'QQQQ': 'QQQQ'}
-    # }
-    # main_index_tickers = ['SPY', 'QQQ']
-
     index_ticker_db = return_index_tickers(index_dir=os.path.join(db_root, 'index_tickers'), ext='.csv')
 
     """ Return Index Charts & Data for All Tickers Wanted"""
     """ Return Tickers of SP500 & Nasdaq / Other Tickers"""    
 
-####<>///<>///<>///<>///<>/// ALL FUNCTIONS NECTOR ####<>///<>///<>///<>///<>///
-### BARS
-def return_bars(symbol, timeframe, ndays, trading_days_df, sdate_input=False, edate_input=False):
-    try:
-        s = datetime.datetime.now()
-        error_dict = {}
+# ####<>///<>///<>///<>///<>/// ALL FUNCTIONS NECTOR ####<>///<>///<>///<>///<>///
+# ### BARS
+# def return_bars(symbol, timeframe, ndays, trading_days_df, sdate_input=False, edate_input=False):
+#     try:
+#         s = datetime.datetime.now()
+#         error_dict = {}
 
-        try:
-            # Fetch bars for prior ndays and then add on today
-            # s_fetch = datetime.datetime.now()
-            if edate_input != False:
-                end_date = edate_input
-            else:
-                end_date = datetime.datetime.now().strftime("%Y-%m-%d")
+#         try:
+#             # Fetch bars for prior ndays and then add on today
+#             # s_fetch = datetime.datetime.now()
+#             if edate_input != False:
+#                 end_date = edate_input
+#             else:
+#                 end_date = datetime.datetime.now().strftime("%Y-%m-%d")
             
-            if sdate_input != False:
-                start_date = sdate_input
-            else:
-                if ndays == 0:
-                    start_date = datetime.datetime.now().strftime("%Y-%m-%d")
-                else:
-                    # start_date = trading_days_df.query('date < @current_day').tail(ndays).head(1).date
-                    trading_days_df_ = trading_days_df[trading_days_df['date'] < current_date] # less then current date
-                    start_date = trading_days_df_.tail(ndays).head(1).date
-                    start_date = start_date.iloc[-1].strftime("%Y-%m-%d")
+#             if sdate_input != False:
+#                 start_date = sdate_input
+#             else:
+#                 if ndays == 0:
+#                     start_date = datetime.datetime.now().strftime("%Y-%m-%d")
+#                 else:
+#                     # start_date = trading_days_df.query('date < @current_day').tail(ndays).head(1).date
+#                     trading_days_df_ = trading_days_df[trading_days_df['date'] < current_date] # less then current date
+#                     start_date = trading_days_df_.tail(ndays).head(1).date
+#                     start_date = start_date.iloc[-1].strftime("%Y-%m-%d")
 
-            symbol_data = api.get_bars(symbol, timeframe=timeframe,
-                                        start=start_date,
-                                        end=end_date, 
-                                        adjustment='all').df
+#             symbol_data = api.get_bars(symbol, timeframe=timeframe,
+#                                         start=start_date,
+#                                         end=end_date, 
+#                                         adjustment='all').df
 
-            # e_fetch = datetime.datetime.now()
-            # print('symbol fetch', str((e_fetch - s_fetch)) + ": " + datetime.datetime.now().strftime('%Y-%m-%d %H:%M'))
-            if len(symbol_data) == 0:
-                error_dict[symbol] = {'msg': 'no data returned', 'time': time}
-                return [False, error_dict]
-        except Exception as e:
-            # print(" log info")
-            error_dict[symbol] = e   
+#             # e_fetch = datetime.datetime.now()
+#             # print('symbol fetch', str((e_fetch - s_fetch)) + ": " + datetime.datetime.now().strftime('%Y-%m-%d %H:%M'))
+#             if len(symbol_data) == 0:
+#                 error_dict[symbol] = {'msg': 'no data returned', 'time': time}
+#                 return [False, error_dict]
+#         except Exception as e:
+#             # print(" log info")
+#             error_dict[symbol] = e   
 
-        # set index to EST time
-        symbol_data['index_timestamp'] = symbol_data.index
-        symbol_data['timestamp_est'] = symbol_data['index_timestamp'].apply(lambda x: x.astimezone(est))
-        del symbol_data['index_timestamp']
-        # symbol_data['timestamp'] = symbol_data['timestamp_est']
-        # symbol_data = symbol_data.reset_index()
-        symbol_data = symbol_data.set_index('timestamp_est')
-        # del symbol_data['timestamp']
-        # symbol_data['timestamp_est'] = symbol_data.index
-        symbol_data['symbol'] = symbol
+#         # set index to EST time
+#         symbol_data['index_timestamp'] = symbol_data.index
+#         symbol_data['timestamp_est'] = symbol_data['index_timestamp'].apply(lambda x: x.astimezone(est))
+#         del symbol_data['index_timestamp']
+#         # symbol_data['timestamp'] = symbol_data['timestamp_est']
+#         # symbol_data = symbol_data.reset_index()
+#         symbol_data = symbol_data.set_index('timestamp_est')
+#         # del symbol_data['timestamp']
+#         # symbol_data['timestamp_est'] = symbol_data.index
+#         symbol_data['symbol'] = symbol
 
-        # Make two dataframes one with just market hour data the other with after hour data
-        if "day" in timeframe:
-            market_hours_data = symbol_data  # keeping as copy since main func will want to return markethours
-            after_hours_data =  None
-        else:
-            market_hours_data = symbol_data.between_time('9:30', '16:00')
-            market_hours_data = market_hours_data.reset_index()
-            after_hours_data =  symbol_data.between_time('16:00', '9:30')
-            after_hours_data = after_hours_data.reset_index()          
+#         # Make two dataframes one with just market hour data the other with after hour data
+#         if "day" in timeframe:
+#             market_hours_data = symbol_data  # keeping as copy since main func will want to return markethours
+#             after_hours_data =  None
+#         else:
+#             market_hours_data = symbol_data.between_time('9:30', '16:00')
+#             market_hours_data = market_hours_data.reset_index()
+#             after_hours_data =  symbol_data.between_time('16:00', '9:30')
+#             after_hours_data = after_hours_data.reset_index()          
 
-        e = datetime.datetime.now()
-        # print(str((e - s)) + ": " + datetime.datetime.now().strftime('%Y-%m-%d %H:%M'))
+#         e = datetime.datetime.now()
+#         # print(str((e - s)) + ": " + datetime.datetime.now().strftime('%Y-%m-%d %H:%M'))
 
-        return [True, symbol_data, market_hours_data, after_hours_data]
-    # handle error
-    except Exception as e:
-        print("sending email of error", e)
-# r = return_bars(symbol='SPY', timeframe='1Minute', ndays=0, trading_days_df=trading_days_df)
+#         return [True, symbol_data, market_hours_data, after_hours_data]
+#     # handle error
+#     except Exception as e:
+#         print("sending email of error", e)
+# # r = return_bars(symbol='SPY', timeframe='1Minute', ndays=0, trading_days_df=trading_days_df)
 
 
-def return_bars_list(ticker_list, chart_times):
-    try:
-        s = datetime.datetime.now()
-        # ticker_list = ['SPY', 'QQQ']
-        # chart_times = {
-        #     "1Minute_1Day": 0, "5Minute_5Day": 5, "30Minute_1Month": 18, 
-        #     "1Hour_3Month": 48, "2Hour_6Month": 72, 
-        #     "1Day_1Year": 250
-        #     }
-        return_dict = {}
-        error_dict = {}
+# def return_bars_list(ticker_list, chart_times):
+#     try:
+#         s = datetime.datetime.now()
+#         # ticker_list = ['SPY', 'QQQ']
+#         # chart_times = {
+#         #     "1Minute_1Day": 0, "5Minute_5Day": 5, "30Minute_1Month": 18, 
+#         #     "1Hour_3Month": 48, "2Hour_6Month": 72, 
+#         #     "1Day_1Year": 250
+#         #     }
+#         return_dict = {}
+#         error_dict = {}
 
-        try:
-            for charttime, ndays in chart_times.items():
-                timeframe=charttime.split("_")[0] # '1Minute_1Day'
-                # if timeframe.lower() == '1minute':
-                #     start_date = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime("%Y-%m-%d") # get yesterdays trades as well
-                # else:
-                #     start_date = datetime.datetime.now().strftime("%Y-%m-%d")
+#         try:
+#             for charttime, ndays in chart_times.items():
+#                 timeframe=charttime.split("_")[0] # '1Minute_1Day'
+#                 # if timeframe.lower() == '1minute':
+#                 #     start_date = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime("%Y-%m-%d") # get yesterdays trades as well
+#                 # else:
+#                 #     start_date = datetime.datetime.now().strftime("%Y-%m-%d")
                 
 
-                trading_days_df_ = trading_days_df[trading_days_df['date'] < current_date] # less then current date
-                start_date = trading_days_df_.tail(ndays).head(1).date
-                start_date = start_date.iloc[-1].strftime("%Y-%m-%d")
+#                 trading_days_df_ = trading_days_df[trading_days_df['date'] < current_date] # less then current date
+#                 start_date = trading_days_df_.tail(ndays).head(1).date
+#                 start_date = start_date.iloc[-1].strftime("%Y-%m-%d")
 
-                # start_date = trading_days_df.query('date < @current_day').tail(ndays).head(1).date
-                end_date = datetime.datetime.now().strftime("%Y-%m-%d")
-                symbol_data = api.get_bars(ticker_list, timeframe=timeframe,
-                                            start=start_date,
-                                            end=end_date,
-                                            adjustment='all').df
+#                 # start_date = trading_days_df.query('date < @current_day').tail(ndays).head(1).date
+#                 end_date = datetime.datetime.now().strftime("%Y-%m-%d")
+#                 symbol_data = api.get_bars(ticker_list, timeframe=timeframe,
+#                                             start=start_date,
+#                                             end=end_date,
+#                                             adjustment='all').df
                 
-                # set index to EST time
-                symbol_data['index_timestamp'] = symbol_data.index
-                symbol_data['timestamp_est'] = symbol_data['index_timestamp'].apply(lambda x: x.astimezone(est))
-                del symbol_data['index_timestamp']
-                # symbol_data['timestamp'] = symbol_data['timestamp_est']
-                symbol_data = symbol_data.reset_index(drop=True)
-                # symbol_data = symbol_data.set_index('timestamp')
-                # del symbol_data['timestamp']
-                # symbol_data['timestamp_est'] = symbol_data.index
-                return_dict[charttime] = symbol_data
+#                 # set index to EST time
+#                 symbol_data['index_timestamp'] = symbol_data.index
+#                 symbol_data['timestamp_est'] = symbol_data['index_timestamp'].apply(lambda x: x.astimezone(est))
+#                 del symbol_data['index_timestamp']
+#                 # symbol_data['timestamp'] = symbol_data['timestamp_est']
+#                 symbol_data = symbol_data.reset_index(drop=True)
+#                 # symbol_data = symbol_data.set_index('timestamp')
+#                 # del symbol_data['timestamp']
+#                 # symbol_data['timestamp_est'] = symbol_data.index
+#                 return_dict[charttime] = symbol_data
 
-            # e_fetch = datetime.datetime.now()
-            # print('symbol fetch', str((e_fetch - s_fetch)) + ": " + datetime.datetime.now().strftime('%Y-%m-%d %H:%M'))
-            if len(symbol_data) == 0:
-                error_dict[ticker_list] = {'msg': 'no data returned', 'time': time}
-                return [False, error_dict]
-        except Exception as e:
-            # print(" log info")
-            error_dict[ticker_list] = e      
+#             # e_fetch = datetime.datetime.now()
+#             # print('symbol fetch', str((e_fetch - s_fetch)) + ": " + datetime.datetime.now().strftime('%Y-%m-%d %H:%M'))
+#             if len(symbol_data) == 0:
+#                 error_dict[ticker_list] = {'msg': 'no data returned', 'time': time}
+#                 return [False, error_dict]
+#         except Exception as e:
+#             # print(" log info")
+#             error_dict[ticker_list] = e      
 
-        e = datetime.datetime.now()
-        # print(str((e - s)) + ": " + datetime.datetime.now().strftime('%Y-%m-%d %H:%M'))
-        # 0:00:00.310582: 2022-03-21 14:44 to return day 0
-        # 0:00:00.497821: 2022-03-21 14:46 to return 5 days
-        return [True, return_dict]
-    # handle error
-    except Exception as e:
-        print("sending email of error", e)
-        return [False, e]
-# r = return_bars_list(ticker_list, chart_times)
+#         e = datetime.datetime.now()
+#         # print(str((e - s)) + ": " + datetime.datetime.now().strftime('%Y-%m-%d %H:%M'))
+#         # 0:00:00.310582: 2022-03-21 14:44 to return day 0
+#         # 0:00:00.497821: 2022-03-21 14:46 to return 5 days
+#         return [True, return_dict]
+#     # handle error
+#     except Exception as e:
+#         print("sending email of error", e)
+#         return [False, e]
+# # r = return_bars_list(ticker_list, chart_times)
 
 
-def close_worker(queens_chess_piece):
+def close_worker(queens_chess_piece, s):
     if s >= datetime.datetime(s.year, s.month, s.day, hour=16, minute=1):
         logging.info("Happy Bee Day End")
         print("Great Job! See you Tomorrow")
@@ -452,35 +412,39 @@ def Return_Init_ChartData(ticker_list, chart_times): #Iniaite Ticker Charts with
     #     "1Minute_1Day": 0, "5Minute_5Day": 5, "30Minute_1Month": 18, 
     #     "1Hour_3Month": 48, "2Hour_6Month": 72, 
     #     "1Day_1Year": 250}
-    msg = (ticker_list, chart_times)
-    logging.info(msg)
-    print(msg)
+    try:
+        msg = (ticker_list, chart_times)
+        logging.info(msg)
+        print(msg)
 
-    error_dict = {}
-    s = datetime.datetime.now()
-    dfs_index_tickers = {}
-    bars = return_bars_list(ticker_list, chart_times)
-    if bars[1]: # rebuild and split back to ticker_time with market hours only
-        bars_dfs = bars[1]
-        for timeframe, df in bars_dfs.items():
-            time_frame=timeframe.split("_")[0] # '1day_1year'
-            if '1day' in time_frame.lower():
-                for ticker in ticker_list:
-                    df_return = df[df['symbol']==ticker].copy()
-                    dfs_index_tickers[f'{ticker}{"_"}{timeframe}'] = df_return
-            else:
-                df = df.set_index('timestamp_est')
-                market_hours_data = df.between_time('9:30', '16:00')
-                market_hours_data = market_hours_data.reset_index()
-                for ticker in ticker_list:
-                    df_return = market_hours_data[market_hours_data['symbol']==ticker].copy()
-                    dfs_index_tickers[f'{ticker}{"_"}{timeframe}'] = df_return
-    
-    e = datetime.datetime.now()
-    msg = {'function':'Return_Init_ChartData',  'func_timeit': str((e - s)), 'datetime': datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S_%p')}
-    print(msg)
-    # dfs_index_tickers['SPY_5Minute']
-    return {'init_charts': dfs_index_tickers, 'errors': error_dict}
+        error_dict = {}
+        s = datetime.datetime.now()
+        dfs_index_tickers = {}
+        bars = return_bars_list(ticker_list, chart_times)
+        if bars[1]: # rebuild and split back to ticker_time with market hours only
+            bars_dfs = bars[1]
+            for timeframe, df in bars_dfs.items():
+                time_frame=timeframe.split("_")[0] # '1day_1year'
+                if '1day' in time_frame.lower():
+                    for ticker in ticker_list:
+                        df_return = df[df['symbol']==ticker].copy()
+                        dfs_index_tickers[f'{ticker}{"_"}{timeframe}'] = df_return
+                else:
+                    df = df.set_index('timestamp_est')
+                    market_hours_data = df.between_time('9:30', '16:00')
+                    market_hours_data = market_hours_data.reset_index()
+                    for ticker in ticker_list:
+                        df_return = market_hours_data[market_hours_data['symbol']==ticker].copy()
+                        dfs_index_tickers[f'{ticker}{"_"}{timeframe}'] = df_return
+        
+        e = datetime.datetime.now()
+        msg = {'function':'Return Init ChartData',  'func_timeit': str((e - s)), 'datetime': datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S_%p')}
+        print(msg)
+        # dfs_index_tickers['SPY_5Minute']
+        return {'init_charts': dfs_index_tickers, 'errors': error_dict}
+    except Exception as e:
+        print(e, print_line_of_error())
+        sys.exit()
 
 
 def Return_Bars_LatestDayRebuild(ticker_time): #Iniaite Ticker Charts with Indicator Data
@@ -739,7 +703,7 @@ def pollen_hunt(df_tickers_data, MACD):
 
 
 """ Initiate your Charts with Indicators """
-def initiate_ttframe_charts(queens_chess_piece, master_tickers, star_times, MACD_settings):
+def initiate_ttframe_charts(QUEEN, queens_chess_piece, master_tickers, star_times, MACD_settings):
     s_mainbeetime = datetime.datetime.now()
     res = Return_Init_ChartData(ticker_list=master_tickers, chart_times=star_times)
     errors = res['errors']
@@ -764,6 +728,10 @@ def initiate_ttframe_charts(queens_chess_piece, master_tickers, star_times, MACD
     logging.info(msg)
     print(msg)    
 
+def chunk(it, size):
+    it = iter(it)
+    return iter(lambda: tuple(islice(it, size)), ())
+
 
 print(
 """
@@ -782,25 +750,7 @@ else:
     logging.info("Buzz Buzz Where My Honey")
 
 # init files needed
-PB_Story_Pickle = os.path.join(db_root, f'{queens_chess_piece}{".pkl"}')
-if queens_chess_piece == 'castle':
-    chart_times_castle = {
-            "1Minute_1Day": 1, 
-            "5Minute_5Day": 5,
-            "30Minute_1Month": 18, 
-            "1Hour_3Month": 48,
-            "2Hour_6Month": 72, 
-            "1Day_1Year": 250}
-
-if queens_chess_piece == 'bishop':
-    chart_times_bishop = {
-            "1Minute_1Day": 1, 
-            "5Minute_5Day": 5,
-            "30Minute_1Month": 18, 
-            "1Hour_3Month": 48, 
-            "2Hour_6Month": 72, 
-            "1Day_1Year": 250}
-
+# PB_Story_Pickle = os.path.join(db_root, f'{queens_chess_piece}{".pkl"}')
 
 init_pollen = init_pollen_dbs(db_root=db_root, api=api, prod=prod, queens_chess_piece=queens_chess_piece)
 PB_QUEEN_Pickle = init_pollen['PB_QUEEN_Pickle']
@@ -812,119 +762,129 @@ if os.path.exists(PB_QUEEN_Pickle) == False:
 
 # Pollen QUEEN
 if prod:
-    WORKER_QUEEN = ReadPickleData(pickle_file=os.path.join(db_root, 'queen.pkl'))
+    QUEENBEE = ReadPickleData(pickle_file=os.path.join(db_root, 'queen.pkl'))
 else:
-    WORKER_QUEEN = ReadPickleData(pickle_file=os.path.join(db_root, 'queen_sandbox.pkl'))
+    QUEENBEE = ReadPickleData(pickle_file=os.path.join(db_root, 'queen_sandbox.pkl'))
 
-WORKER_QUEEN['source'] = PB_QUEEN_Pickle
-MACD_12_26_9 = WORKER_QUEEN['queen_controls']['MACD_fast_slow_smooth']
-master_tickers = WORKER_QUEEN['workerbees'][queens_chess_piece]['tickers']
-MACD_settings = WORKER_QUEEN['workerbees'][queens_chess_piece]['MACD_fast_slow_smooth']
-star_times = WORKER_QUEEN['workerbees'][queens_chess_piece]['stars']
+QUEENBEE['source'] = PB_QUEEN_Pickle
+MACD_12_26_9 = QUEENBEE['queen_controls']['MACD_fast_slow_smooth']
+# master_tickers = QUEENBEE['workerbees'][queens_chess_piece]['tickers']
+MACD_settings = QUEENBEE['workerbees'][queens_chess_piece]['MACD_fast_slow_smooth']
+star_times = QUEENBEE['workerbees'][queens_chess_piece]['stars']
+
+
+asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy()) # needed to work on Windows
+
+def ticker_star_hunter_bee(QUEENBEE, queens_chess_piece):
+    s = datetime.datetime.now()
+    
+    QUEEN = WORKERBEE_queens[queens_chess_piece]
+    PB_Story_Pickle = os.path.join(db_root, f'{queens_chess_piece}{".pkl"}')
+    MACD_12_26_9 = QUEENBEE['queen_controls']['MACD_fast_slow_smooth']
+    master_tickers = QUEENBEE['workerbees'][queens_chess_piece]['tickers']
+    # MACD_settings = QUEENBEE['workerbees'][queens_chess_piece]['MACD_fast_slow_smooth']
+    # star_times = QUEENBEE['workerbees'][queens_chess_piece]['stars']
+
+
+    close_worker(queens_chess_piece=queens_chess_piece, s=s)
+
+    # main 
+    pollen = pollen_hunt(df_tickers_data=QUEEN[queens_chess_piece]['pollencharts'], MACD=MACD_12_26_9)
+    QUEEN[queens_chess_piece]['pollencharts'] = pollen['pollencharts']
+    QUEEN[queens_chess_piece]['pollencharts_nectar'] = pollen['pollencharts_nectar']
+    
+    pollens_honey = pollen_story(pollen_nectar=QUEEN[queens_chess_piece]['pollencharts_nectar'], QUEEN=QUEEN, queens_chess_piece=queens_chess_piece)
+    ANGEL_bee = pollens_honey['conscience']['ANGEL_bee']
+    knights_sight_word = pollens_honey['conscience']['KNIGHTSWORD']
+    STORY_bee = pollens_honey['conscience']['STORY_bee']
+    betty_bee = pollens_honey['betty_bee']
+    PickleData(pickle_file=os.path.join(db_root, 'betty_bee.pkl'), data_to_store=betty_bee)
+
+    # for each star append last macd state
+    for ticker_time_frame, i in STORY_bee.items():
+        speed_gauges[ticker_time_frame]['macd_gauge'].append(i['story']['macd_state'])
+        speed_gauges[ticker_time_frame]['price_gauge'].append(i['story']['last_close_price'])
+        STORY_bee[ticker_time_frame]['story']['macd_gauge'] = speed_gauges[ticker_time_frame]['macd_gauge']
+        STORY_bee[ticker_time_frame]['story']['price_gauge'] = speed_gauges[ticker_time_frame]['price_gauge']
+
+    
+    SPEEDY_bee = speed_gauges
+
+    # add all charts
+    QUEEN[queens_chess_piece]['pollenstory'] = pollens_honey['pollen_story']
+
+    # populate conscience
+    QUEEN[queens_chess_piece]['conscience']['ANGEL_bee'] = ANGEL_bee
+    QUEEN[queens_chess_piece]['conscience']['KNIGHTSWORD'] = knights_sight_word
+    QUEEN[queens_chess_piece]['conscience']['STORY_bee'] = STORY_bee
+    QUEEN[queens_chess_piece]['conscience']['SPEEDY_bee'] = SPEEDY_bee
+
+    
+    PickleData(pickle_file=PB_Story_Pickle, data_to_store=QUEEN)
+
+    return True
+
+# Change Log
+def return_change_log(qcp_s, QUEENBEE):
+    try:
+        s = datetime.datetime.now()
+        async def get_changelog(session, qcp):
+            async with session:
+                try:
+                    ticker_star_hunter_bee(QUEENBEE=QUEENBEE, queens_chess_piece=qcp)
+                    return {qcp: ''}
+                except Exception as e:
+                    print(e, qcp)
+                    logging.error((str(qcp), str(e)))
+                    return {qcp: e}
+                    
+        async def main(qcp_s):
+
+            async with aiohttp.ClientSession() as session:
+                return_list = []
+                tasks = []
+                for qcp in qcp_s:
+                    tasks.append(asyncio.ensure_future(get_changelog(session, qcp)))
+                original_pokemon = await asyncio.gather(*tasks)
+                for pokemon in original_pokemon:
+                    return_list.append(pokemon)
+                return return_list
+
+        x = asyncio.run(main(qcp_s))
+        e = datetime.datetime.now()
+        # print("--- %s seconds ---" % (e - s))
+        return x
+    except Exception as e:
+        print("qtf", e, print_line_of_error())
+# batch1 = urls[200:300]
+# x=return_change_log(urls=batch1)
 
 
 try:
 
-    initiate_ttframe_charts(queens_chess_piece=queens_chess_piece, master_tickers=master_tickers, star_times=star_times, MACD_settings=MACD_settings) # only Initiates if Castle or Bishop
+    master_tickers = []
+    queens_chess_pieces = [] 
+    for qcp, qcp_vars in QUEENBEE['workerbees'].items():
+        for ticker in qcp_vars['tickers']:
+            if qcp in 'castle' or qcp in 'bishop':
+                master_tickers.append(ticker)
+                queens_chess_pieces.append(qcp)
+    queens_chess_pieces = list(set(queens_chess_pieces))
+
+
+    # initiate_ttframe_charts(queens_chess_piece=queens_chess_piece, master_tickers=master_tickers, star_times=star_times, MACD_settings=MACD_settings) # only Initiates if Castle or Bishop
+    WORKERBEE_queens = {i: init_QUEENWORKER(i) for i in queens_chess_pieces}
+    for qcp_worker in WORKERBEE_queens.keys():
+        initiate_ttframe_charts(QUEEN=WORKERBEE_queens[qcp_worker], queens_chess_piece=qcp_worker, master_tickers=master_tickers, star_times=star_times, MACD_settings=MACD_settings) # only Initiates if Castle or Bishop
+
+    
     workerbee_run_times = []
     speed_gauges = {
         f'{tic}{"_"}{star_}': {'macd_gauge': deque([], 89), 'price_gauge': deque([], 89)}
         for tic in master_tickers for star_ in star_times.keys()}
 
     while True:
-        if queens_chess_piece.lower() in ['castle', 'bishop']: # create the story
-            s = datetime.datetime.now()
-            close_worker(queens_chess_piece=queens_chess_piece)
-            
-            # main 
-            pollen = pollen_hunt(df_tickers_data=QUEEN[queens_chess_piece]['pollencharts'], MACD=MACD_12_26_9)
-            QUEEN[queens_chess_piece]['pollencharts'] = pollen['pollencharts']
-            QUEEN[queens_chess_piece]['pollencharts_nectar'] = pollen['pollencharts_nectar']
-            
-            pollens_honey = pollen_story(pollen_nectar=QUEEN[queens_chess_piece]['pollencharts_nectar'], QUEEN=QUEEN, queens_chess_piece=queens_chess_piece)
-            ANGEL_bee = pollens_honey['conscience']['ANGEL_bee']
-            knights_sight_word = pollens_honey['conscience']['KNIGHTSWORD']
-            STORY_bee = pollens_honey['conscience']['STORY_bee']
-            betty_bee = pollens_honey['betty_bee']
-            PickleData(pickle_file=os.path.join(db_root, 'betty_bee.pkl'), data_to_store=betty_bee)
-
-            # for each star append last macd state
-            for ticker_time_frame, i in STORY_bee.items():
-                speed_gauges[ticker_time_frame]['macd_gauge'].append(i['story']['macd_state'])
-                speed_gauges[ticker_time_frame]['price_gauge'].append(i['story']['last_close_price'])
-                STORY_bee[ticker_time_frame]['story']['macd_gauge'] = speed_gauges[ticker_time_frame]['macd_gauge']
-                STORY_bee[ticker_time_frame]['story']['price_gauge'] = speed_gauges[ticker_time_frame]['price_gauge']
-
-            
-            SPEEDY_bee = speed_gauges
-
-            # add all charts
-            QUEEN[queens_chess_piece]['pollenstory'] = pollens_honey['pollen_story']
-
-            # populate conscience
-            QUEEN[queens_chess_piece]['conscience']['ANGEL_bee'] = ANGEL_bee
-            QUEEN[queens_chess_piece]['conscience']['KNIGHTSWORD'] = knights_sight_word
-            QUEEN[queens_chess_piece]['conscience']['STORY_bee'] = STORY_bee
-            QUEEN[queens_chess_piece]['conscience']['SPEEDY_bee'] = SPEEDY_bee
-
-
-            
-            # speedybee to get past 30 second tics from major stocks with highest weight for SPY / QQQ
-            # if queens_chess_piece == 'castle':
-            #     try:
-            #         speedybee_resp = speedybee(QUEEN, queens_chess_piece, ticker_list=client_market_movers)
-            #         QUEEN[queens_chess_piece]['pollenstory_info']['speedybee'] = speedybee_resp['speedybee']
-            #     except Exception as e:
-            #         print(e)
-            # God Save The QUEEN
-            # ipdb.set_trace()
-            
-            PickleData(pickle_file=PB_Story_Pickle, data_to_store=QUEEN)
-
-            e = datetime.datetime.now()
-            cycle_run_time = (e-s)
-            cycle_run_time_print = str(cycle_run_time.seconds) + "." + str(cycle_run_time.microseconds)[:2]
-            QUEEN[queens_chess_piece]['heartbeat']['cycle_time'].append(cycle_run_time)
-            if cycle_run_time.seconds > 20:
-                print("CYCLE TIME SLLLLLLOOOoooooOOOOOO????")
-                logging.info(("cycle_time > 20 seconds", cycle_run_time_print))
-            workerbee_run_times = QUEEN[queens_chess_piece]['heartbeat']['cycle_time']
-            avg_time = round(sum([i.seconds for i in workerbee_run_times]) / len(workerbee_run_times),2)
-            print(queens_chess_piece, " avg cycle time(last89):", avg_time, ": ", cycle_run_time_print,  "sec: ", datetime.datetime.now().strftime("%A,%d. %I:%M:%S%p"))
-
-        if queens_chess_piece.lower() == 'workerbee': # return tics
-            s = datetime.datetime.now()
-            if s > datetime.datetime(s.year, s.month, s.day, 16):
-                logging.info("Happy Bee Day End")
-                print("Great Job! See you Tomorrow")
-                break
-            tic_tickers = ['AAPL', 'TSLA', 'GOOG', 'FB']
-            r = rebuild_timeframe_bars(ticker_list=tic_tickers, build_current_minute=False, min_input=0, sec_input=30) # return all tics
-            resp = r['resp'] # return slope of collective tics
-            slope_dict = {}
-            for symbol in set(resp['symbol'].to_list()):
-                df = resp[resp['symbol']==symbol].copy()
-                df = df.reset_index()
-                df_len = len(df)
-                if df_len > 2:
-                    slope, intercept, r_value, p_value, std_err = stats.linregress(df.index, df['price'])
-                    slope_dict[df.iloc[0].symbol] = slope
-
-            print(sum([v for k,v in slope_dict.items()]))
-            # for k, i in slope_dict.items():
-            #     print(k, i)
-            
-            PickleData(pickle_file=PB_Story_Pickle, data_to_store=QUEEN)
-            
-            print(queens_chess_piece, str((e - s).seconds),  "sec: ", datetime.datetime.now().strftime("%A,%d. %I:%M:%S%p"))
-
-        if queens_chess_piece.lower() == 'knight': # TBD
-            s = datetime.datetime.now()
-            if s > datetime.datetime(s.year, s.month, s.day, 16):
-                logging.info("Happy Bee Day End")
-                print("Great Job! See you Tomorrow")
-                break
-            print("seek out and find the best tickers to play with")
+        return_change_log(qcp_s=queens_chess_pieces, QUEENBEE=QUEENBEE)
 
 except Exception as errbuz:
     print(errbuz)
