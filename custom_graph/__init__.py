@@ -8,28 +8,17 @@ _RELEASE = False
 
 if not _RELEASE:
     _component_func = components.declare_component(
-        "custom_grid",
+        "custom_graph",
         url="http://localhost:3001",
     )
 else:
     parent_dir = os.path.dirname(os.path.abspath(__file__))
     build_dir = os.path.join(parent_dir, "frontend", "build")
     _component_func = components.declare_component(
-        "custom_grid", path=build_dir)
+        "custom_graph", path=build_dir)
 
 
-def st_custom_grid(username: str, api: str, api_update: str, refresh_sec: int, refresh_cutoff_sec: int , prod: bool, key:str, api_url:str, button_name :str, grid_options, **kwargs):
+def st_custom_graph():
     component_value = _component_func(
-        username=username,
-        api=api,
-        api_update=api_update,
-        refresh_sec=refresh_sec,
-        refresh_cutoff_sec=refresh_cutoff_sec,
-        prod=prod,
-        key=key,
-        api_url=api_url,
-        button_name=button_name,
-        grid_options=grid_options,
-        kwargs=kwargs
         )
     return component_value
