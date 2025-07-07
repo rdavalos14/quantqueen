@@ -18,16 +18,20 @@ load_dotenv(os.path.join(ozz_master_root(),'.env'))
 CONSTANTS = init_constants()
 
 def hoots_and_hootie(width=350, height=350, 
-                     self_image="hootsAndHootie.png", 
+                     self_image="jamescfp.png", 
                      face_recon=True, 
-                     show_video=True, 
+                     show_video=False, 
                      input_text=True, 
                      show_conversation=True, 
                      no_response_time=3,
                      refresh_ask={},
                      use_embeddings=[],
                      before_trigger={},
-                     phrases=[],):
+                     phrases=[],
+                     agent_actions=["Research", "Rebalance Portfolio", 
+                                    "Financial Planning", "Risk Assessment", 
+                                    ]
+                     ):
     
     to_builder = VoiceGPT_options_builder.create()
     to = to_builder.build()
@@ -75,7 +79,8 @@ def ozz():
     cols = st.columns((3,2))
     with cols[0]:
         col_1 = st.empty()
-    with cols[1]:
+    # with cols[1]:
+    with st.sidebar:
         col_2 = st.empty()
 
     characters = ozz_characters()
@@ -83,22 +88,25 @@ def ozz():
     # user_session_state = init_user_session_state(prod, db_root)
 
     with col_2.container():
-        self_image = st.selectbox("Speak To", options=['James CFP'], key='self_image')
+        self_image = st.selectbox("Speak To", options=['jamescfp'], key='self_image')
+    st.write(self_image)
+    header_prompt = characters[st.session_state.get('self_image')].get('main_prompt')
 
-    main_prompt = characters[st.session_state.get('self_image')].get('main_prompt')
-
-    tabs = st.tabs([f"{self_image.split('.')[0]}", 'System Prompt'])
-
-    with tabs[1]:
-        header_prompt = st.text_area("System_Prompt", main_prompt, height=500)
+    # with tabs[1]:
+    if st.sidebar.toggle("Edit System Prompt", key='edit_system_prompt'):
+        header_prompt = st.text_area("System_Prompt", header_prompt, height=500)
         if st.button("save main prompt"):
             st.info("DB Not Setup Yet")
             # user_session_state['characters'][self_image].update({'main_prompt': header_prompt})
             # save_json(st.session_state['ss_file'], user_session_state)
+    # main_tabs = [f"{self_image.split('.')[0]}"]
+    # if "System_Prompt" in st.session_state:
+    #     main_tabs.append("System_Prompt")
+    
+    # tabs = st.tabs(main_tabs)
 
-        refresh_ask = refreshAsk_kwargs(header_prompt=header_prompt)
+    refresh_ask = refreshAsk_kwargs(header_prompt=header_prompt)
         
-    # st.session_state['hh_vars']['self_image'] = st.session_state['self_image']
 
     width= 350 #st.session_state['hh_vars']['width'] if 'hc_vars' in st.session_state else 350
     height= 350 # st.session_state['hh_vars']['height'] if 'hc_vars' in st.session_state else 350
@@ -120,24 +128,23 @@ def ozz():
             st.write(text)
 
         embedding_default = ['stefan']
-        # user_session_state['use_embeddings'] = embedding_default
-        # save_json(session_state_file_path, user_session_state)
+    # elif self_image == 'jamescfp.png':
+    #     with col_1.container():
+    #         st.header(f"James Your Portfolio Manager")
 
-        # with cols[0]:
-        #     st.markdown(f'<span style="color: red;">{text}</span>', unsafe_allow_html=True)
+        embedding_default = ['jamescfp']
 
     else:
         embedding_default = []
         # user_session_state['use_embeddings'] = embedding_default
         # save_json(session_state_file_path, user_session_state)
 
-
-    if self_image == 'James CFP':
-        pass
-
     with st.sidebar:
         embeddings = os.listdir(CONSTANTS.get('PERSIST_PATH'))
         embeddings = ['None'] + embeddings
+        if [i for i in embedding_default if i not in embeddings]:
+            embedding_default = ['None']
+        
         use_embeddings = st.multiselect("use embeddings", default=embedding_default, options=embeddings)
         st.session_state['use_embedding'] = use_embeddings
         if st.button("save"):
@@ -154,50 +161,20 @@ def ozz():
 
     phrases = hoots_and_hootie_keywords(characters, self_image.split(".")[0])
 
-    with tabs[0]:
-        hoots_and_hootie(
-            width=width,
-            height=height,
-            self_image=self_image,
-            face_recon=face_recon,
-            show_video=show_video,
-            input_text=input_text,
-            show_conversation=show_conversation,
-            no_response_time=no_response_time,
-            refresh_ask=refresh_ask,
-            use_embeddings=use_embeddings,
-            phrases=phrases,
-            )
-
-
-    def list_files_by_date(directory):
-        files = []
-        for filename in os.listdir(directory):
-            filepath = os.path.join(directory, filename)
-            if os.path.isfile(filepath):
-                files.append((filepath, os.path.getmtime(filepath)))
-        files.sort(key=lambda x: x[1], reverse=True)
-        return files
-    
-
-
-    # # Get list of audio files sorted by modification date
-    # db_name, master_text_audio=init_text_audio_db()
-
-    # root_db = ozz_master_root_db()
-    # db_DB_audio = os.path.join(root_db, 'audio')
-    # audio_files = list_files_by_date(db_DB_audio)
-    # with selected_audio_file.container():
-    #     audio_path = st.selectbox("Select Audio File", [os.path.basename(file[0]) for file in audio_files])
-    # # st.write(master_text_audio[-1])
-    # # st.write([i for i in st.session_state])
-    # # st.write(st.session_state['conversation_history.json'])
-    # response=requests.get(f"{st.session_state['ip_address']}/api/data/{audio_path}")
-    # with llm_audio.container():
-    #     # st.info(kw)
-    #     st.audio(response.content, format="audio/mp3")  
-
-
+    # with tabs[0]:
+    hoots_and_hootie(
+        width=width,
+        height=height,
+        self_image=self_image,
+        face_recon=face_recon,
+        show_video=show_video,
+        input_text=input_text,
+        show_conversation=show_conversation,
+        no_response_time=no_response_time,
+        refresh_ask=refresh_ask,
+        use_embeddings=use_embeddings,
+        phrases=phrases,
+        )
 
 
     def local_gif(gif_path, width="33", height="33", sidebar=False, url=False):
