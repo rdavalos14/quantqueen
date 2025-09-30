@@ -37,7 +37,7 @@ def hive_master_root_db(info='\pollen\pollen\db'):
 main_root = hive_master_root()  # os.getcwd()
 load_dotenv(os.path.join(main_root, ".env"))
 
-pg_migration = os.getenv('pg_migration')
+pg_migration = os.getenv('pg_migration', 'False').lower() == 'true'
 
 
 def get_ip_address():
@@ -430,6 +430,11 @@ def PickleData(pickle_file, data_to_store, write_temp=False, console=True):
     if not pickle_file.endswith('.pkl'):
         pickle_file = pickle_file + ".pkl"
     if pickle_file:
+        # Ensure the directory exists
+        directory = os.path.dirname(pickle_file)
+        if directory and not os.path.exists(directory):
+            os.makedirs(directory, exist_ok=True)
+        
         if write_temp:
             root, name = os.path.split(pickle_file)
             pickle_file_temp = os.path.join(root, ("temp" + name))
@@ -502,7 +507,7 @@ def streamlit_config_colors():
         "default_text_color": "#055A6E",
         "default_font": "sans serif",
         "default_yellow_color": "#E6C93B",
-        "default_background_color": '#f2f7ff',
+        "default_background_color": '#FFFFFF',
     }
 
     return k_colors

@@ -14,9 +14,25 @@ import random
 import requests 
 from PIL import Image
 
-from elevenlabs import set_api_key
-from elevenlabs import Voice, VoiceSettings, generate
-from elevenlabs import save
+# from elevenlabs import set_api_key
+# from elevenlabs import Voice, VoiceSettings, generate
+# from elevenlabs import save
+
+# Elevenlabs functions - commented out due to pydantic compatibility issues
+def set_api_key(key):
+    pass
+
+def Voice(voice_id, settings=None):
+    return None
+
+def VoiceSettings(stability=0.5, similarity_boost=0.5, style=0.0, use_speaker_boost=True):
+    return None
+
+def generate(text, voice=None, model=None, stream=False):
+    return b""  # Return empty bytes
+
+def save(audio, filename):
+    pass
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores.faiss import FAISS
@@ -33,8 +49,6 @@ import argparse
 
 from pydub import AudioSegment
 
-from custom_voiceGPT import custom_voiceGPT, VoiceGPT_options_builder
-
 from bs4 import BeautifulSoup
 import re
 from streamlit_extras.switch_page_button import switch_page
@@ -50,7 +64,7 @@ import subprocess
 from chess_piece.pollen_db import PollenDatabase
 from chess_piece.king import hive_master_root, hive_master_root_db
 
-pg_migration = os.getenv('pg_migration')
+pg_migration = os.getenv('pg_migration', 'False').lower() == 'true'
 
 # from youtubesearchpython import *
 #### AUTH UTILS #####
@@ -97,11 +111,9 @@ def init_constants():
     PERSIST_PATH = f"{OZZ_DB}/STORAGE"
     OZZ_db_audio = f"{OZZ_DB}/audio"
     OZZ_db_images = f"{OZZ_DB}/images"
-    OZZ_BUILD_dir = f"{ROOT_PATH}/custom_voiceGPT/frontend/build"
 
     data_paths = {'DATA_PATH': DATA_PATH,
             'PERSIST_PATH':PERSIST_PATH,
-            'OZZ_BUILD_dir': OZZ_BUILD_dir,
             "OZZ_db_audio": OZZ_db_audio,
             "OZZ_db_images": OZZ_db_images,
             "ROOT_PATH": ROOT_PATH,
@@ -115,7 +127,6 @@ OZZ_DB = ozz_master_root_db()
 constants = init_constants()
 DATA_PATH = constants.get('DATA_PATH')
 PERSIST_PATH = constants.get('PERSIST_PATH')
-OZZ_BUILD_dir = constants.get('OZZ_BUILD_dir')
 OZZ_db_audio = constants.get('OZZ_db_audio')
 OZZ_db_images = constants.get('OZZ_db_images')
 

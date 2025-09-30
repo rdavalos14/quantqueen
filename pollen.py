@@ -43,7 +43,7 @@ from chess_piece.pollen_db import PollenDatabase
 
 import ipdb
 
-pg_migration = os.getenv('pg_migration')
+pg_migration = os.getenv('pg_migration', 'False').lower() == 'true'
 
 
 pd.options.mode.chained_assignment = None
@@ -295,6 +295,7 @@ def add_new_trading_models_settings(QUEEN_KING, active_orders=False):
                     missing_rules = [i for i in latest_rules if i not in waveblock_kor.keys()]                
                     # (missing_rules)
                     if len(missing_rules) > 0:
+                        print("ADDING NEW RULES", missing_rules, " Model: ", ticker, ticker_star, trigbee, blocktime)
                         save = True
                         new_rules_confirmation[ticker] = []
                         for new_rule in missing_rules:
@@ -383,7 +384,7 @@ def clean_out_app_requests(QUEEN, QUEEN_KING, request_buckets, prod):
     
     return True
 
-@st.cache_data(ttl=timedelta(days=1))
+
 def fetch_portfolio_history(_api, period='3M', timeframe='1D'):
     try:
         # Fetch portfolio history
@@ -403,7 +404,31 @@ def fetch_portfolio_history(_api, period='3M', timeframe='1D'):
     except Exception as e:
         print("Error fetching portfolio history:", e)
 
+@st.cache_data(ttl=timedelta(days=1))
+def get_portfolio_performance(_api, periods):
+    perf_dict = {}
+    for period in periods:
+        df = fetch_portfolio_history(_api, period=period)
+        if df is not None and not df.empty:
+            portfolio_perf = round((df.iloc[-1]['equity'] - df.iloc[0]['equity']) / df.iloc[0]['equity'] * 100, 2)
+            perf_dict[period] = portfolio_perf
+        else:
+            perf_dict[period] = None
+    return perf_dict
+
 def pollenq(sandbox=False, demo=False):
+    # Initialize session state variables if they don't exist
+    if "authentication_status" not in st.session_state:
+        st.session_state["authentication_status"] = None
+    if "username" not in st.session_state:
+        st.session_state["username"] = None
+    if "name" not in st.session_state:
+        st.session_state["name"] = None
+    if "logout" not in st.session_state:
+        st.session_state["logout"] = None
+    if "authorized_user" not in st.session_state:
+        st.session_state["authorized_user"] = False
+    
     # st.write("pollenq", demo, sandbox)
     # print("pollenq", demo, sandbox)
     pollen = 'pollen' if not demo else 'demo'
@@ -502,16 +527,17 @@ def pollenq(sandbox=False, demo=False):
 
     with header_text_1.container():
         if not prod:
-            mark_down_text("SandBox Account", fontsize="28", color="#a8b702", align="left")
+            mark_down_text("SandBox Account", fontsize="28", color="#6b7407", align="left")
         else:
             mark_down_text("Live Account", fontsize="28", color="#03457C", align="left")
 
         # if show_acct:
         with cols[3]:
-        # Show all portfolio history periods in columns
-            periods = ["title", '7D', '1M', '3M', '6M', '1A']
-            perf_cols = st.columns(len(periods))
-            perf_containers = [col.container() for col in perf_cols]
+            with st.expander("Portfolio Performance", expanded=True):
+            # Show all portfolio history periods in columns
+                periods = ['7D', '1M', '3M', '6M', '1A']
+                perf_cols = st.columns(len(periods))
+                perf_containers = [col.container() for col in perf_cols]
 
 
     table_name = 'db' if prod else 'db_sandbox'
@@ -549,7 +575,7 @@ def pollenq(sandbox=False, demo=False):
         # switch_page('account')
 
     if menu_id == 'Orders':
-        # switch_page('orders')
+        st.switch_page('pages/orders.py')
         # queen_orders = pd.DataFrame([create_QueenOrderBee(queen_init=True)])
 
         # active_order_state_list = king_G.get('active_order_state_list')
@@ -701,26 +727,28 @@ def pollenq(sandbox=False, demo=False):
             from pages.pollen_engine import pollen_engine
             pollen_engine(acct_info_raw)
 
-        # Show all portfolio history periods in columns
+    portfolio_performance = get_portfolio_performance(api, periods)
     for i, period in enumerate(periods):
-        if i == 0:
+        # if i == 0:
+        #     with perf_containers[i]:
+        #         # mark_down_text('Portfolio', fontsize='23')
+        #         cust_Button("misc/dollar-symbol-unscreen.gif", hoverText='Portfolio', key='portfolio_ahe', )
+        # else:
+        # df = fetch_portfolio_history(api, period=period)
+        portfolio_perf = portfolio_performance.get(period)
+        if portfolio_perf is not None:
+        # if df is not None and not df.empty:
+            # portfolio_perf = round((df.iloc[-1]['equity'] - df.iloc[0]['equity']) / df.iloc[0]['equity'] * 100, 2)
             with perf_containers[i]:
-                # mark_down_text('Portfolio', fontsize='23')
-                cust_Button("misc/dollar-symbol-unscreen.gif", hoverText='Portfolio', key='portfolio_ahe', )
-        else:
-            df = fetch_portfolio_history(api, period=period)
-            
-            if df is not None and not df.empty:
-                portfolio_perf = round((df.iloc[-1]['equity'] - df.iloc[0]['equity']) / df.iloc[0]['equity'] * 100, 2)
-                with perf_containers[i]:
-                    color = "#1d982b" if portfolio_perf > 0 else "#ff4136"
-                    mark_down_text(f'{period}', fontsize='18', color="#888", align="center")
-                    mark_down_text(f'{portfolio_perf}%', fontsize='23', color=color, align="center")
+                color = "#1d982b" if portfolio_perf > 0 else "#ff4136"
+                mark_down_text(f'{period}', fontsize='18', color="#888", align="center")
+                mark_down_text(f'{portfolio_perf}%', fontsize='23', color=color, align="center")
 
 
     if 'pollen' in menu_id:
         refresh_sec = 8 if seconds_to_market_close > 0 and mkhrs == 'open' else 63000
         # account_header_grid(client_user, prod, refresh_sec, ip_address, seconds_to_market_close)
+        st.info(f'{prod_name}, {prod}')
         queens_conscience(prod, revrec, KING, QUEEN_KING, api)
 
     st.session_state['refresh_times'] += 1

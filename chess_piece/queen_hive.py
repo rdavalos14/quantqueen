@@ -49,7 +49,7 @@ main_root = hive_master_root()  # os.getcwd()
 load_dotenv(os.path.join(main_root, ".env"))
 db_root = os.path.join(main_root, "db")
 
-pg_migration = os.getenv('pg_migration')
+pg_migration = os.getenv('pg_migration', 'False').lower() == 'true'
 server = os.getenv('server')
 
 """# Dates """
@@ -168,13 +168,28 @@ macd_tiers = 8
 
 def kingdom__grace_to_find_a_Queen(prod=True):
 
-    if pg_migration:
-        table_name = 'db' if prod else 'db_sandbox'
-        KING = PollenDatabase.retrieve_data(table_name, 'KING')
-    # create list for userdb
-    else:
-        KING = ReadPickleData(master_swarm_KING(prod))
+    try:
+        if pg_migration:
+            table_name = 'db' if prod else 'db_sandbox'
+            KING = PollenDatabase.retrieve_data(table_name, 'KING')
+        # create list for userdb
+        else:
+            KING = ReadPickleData(master_swarm_KING(prod))
+    except Exception as e:
+        print(f"Error loading KING data: {e}")
+        KING = None
     
+    # Handle case where KING is None or doesn't have expected structure
+    if KING is None or not isinstance(KING, dict):
+        print("Warning: KING data is None or invalid, initializing default structure")
+        KING = {
+            'users': {
+                'not_allowed': []
+            }
+        }
+    elif 'users' not in KING:
+        print("Warning: KING missing 'users' key, initializing")
+        KING['users'] = {'not_allowed': []}
     
     if 'not_allowed' not in KING['users'].keys():
         KING['users']['not_allowed'] = []
@@ -259,28 +274,46 @@ def return_alpaca_api_keys(prod):
     # """ Keys """ ### NEEDS TO BE FIXED TO PULL USERS API CREDS UNLESS USER IS PART OF MAIN.FUND.Account
     try:
         if prod:
+            api_key_id = os.environ.get("APCA_API_KEY_ID")
+            api_secret = os.environ.get("APCA_API_SECRET_KEY")
+            if not api_key_id or not api_secret:
+                raise ValueError("Production API credentials not found in environment variables")
+            
             keys = return_api_keys(
                 base_url="https://api.alpaca.markets",
-                api_key_id=os.environ.get("APCA_API_KEY_ID"),
-                api_secret=os.environ.get("APCA_API_SECRET_KEY"),
+                api_key_id=api_key_id,
+                api_secret=api_secret,
                 prod=prod,
             )
             rest = keys["rest"]
             api = keys["api"]
         else:
             # Paper
+            api_key_id = os.environ.get("APCA_API_KEY_ID_PAPER")
+            api_secret = os.environ.get("APCA_API_SECRET_KEY_PAPER")
+            if not api_key_id or not api_secret:
+                raise ValueError("Paper trading API credentials not found in environment variables")
+            
             keys_paper = return_api_keys(
                 base_url="https://paper-api.alpaca.markets",
-                api_key_id=os.environ.get("APCA_API_KEY_ID_PAPER"),
-                api_secret=os.environ.get("APCA_API_SECRET_KEY_PAPER"),
+                api_key_id=api_key_id,
+                api_secret=api_secret,
                 prod=False,
             )
             rest = keys_paper["rest"]
             api = keys_paper["api"]
 
     except Exception as e:
-        print("Key Return failure default to HivesKeys")
-        print(e)
+        print("Key Return failure - API credentials not configured")
+        print(f"Error: {e}")
+        print("Please set the following environment variables:")
+        if prod:
+            print("- APCA_API_KEY_ID")
+            print("- APCA_API_SECRET_KEY")
+        else:
+            print("- APCA_API_KEY_ID_PAPER")
+            print("- APCA_API_SECRET_KEY_PAPER")
+        raise e
 
     return {"rest": rest, "api": api}
 
@@ -316,7 +349,8 @@ def return_alpaca_user_apiKeys(QUEEN_KING, authorized_user, prod):
             if prod:
                 prod_keys_confirmed = QUEEN_KING["users_secrets"]["prod_keys_confirmed"]
                 if prod_keys_confirmed == False:
-                    return False
+                    print("Warning: Production keys not confirmed, using demo mode...")
+                    return create_demo_api()
                 else:
                     api_key_id = QUEEN_KING["users_secrets"]["APCA_API_KEY_ID"]
                     api_secret = QUEEN_KING["users_secrets"]["APCA_API_SECRET_KEY"]
@@ -325,7 +359,8 @@ def return_alpaca_user_apiKeys(QUEEN_KING, authorized_user, prod):
             else:
                 sandbox_keys_confirmed = QUEEN_KING["users_secrets"]["sandbox_keys_confirmed"]
                 if sandbox_keys_confirmed == False:
-                    return False
+                    print("Warning: Sandbox keys not confirmed, using demo mode...")
+                    return create_demo_api()
                 else:
                     api_key_id = QUEEN_KING["users_secrets"]["APCA_API_KEY_ID_PAPER"]
                     api_secret = QUEEN_KING["users_secrets"]["APCA_API_SECRET_KEY_PAPER"]
@@ -338,7 +373,8 @@ def return_alpaca_user_apiKeys(QUEEN_KING, authorized_user, prod):
             return return_alpaca_api_keys(prod=False)["api"]
     except Exception as e:
         print_line_of_error()
-        return False
+        print("Warning: API credentials not available, using demo mode...")
+        return create_demo_api()
 
 
 def hive_dates(api):
@@ -1209,6 +1245,22 @@ def return_STORYbee_trigbees(QUEEN, STORY_bee, tickers_filter=False):
 
     return {"active_trigs": active_trigs, "all_current_trigs": all_current_trigs}
 
+
+def assign_block_time(tframe='1Minute', wave_starttime=datetime.now()):
+    if "Day" in tframe:
+        wave_blocktime = "Day"
+    else:
+        wave_starttime_token = wave_starttime.replace(tzinfo=None)
+        if wave_starttime_token < wave_starttime_token.replace(hour=11, minute=0):
+            wave_blocktime = "morning_9-11"
+        elif wave_starttime_token >= wave_starttime_token.replace(hour=11, minute=0) and wave_starttime_token < wave_starttime_token.replace(hour=14, minute=0):
+            wave_blocktime = "lunch_11-2"
+        elif wave_starttime_token >= wave_starttime_token.replace(hour=14, minute=0) and wave_starttime_token < wave_starttime_token.replace(hour=16, minute=1):
+            wave_blocktime = "afternoon_2-4"
+        else:
+            wave_blocktime = "afterhours"
+    
+    return wave_blocktime
 
 """ STORY: I want a dict of every ticker and the chart_time TRADE buy/signal weights """
 
@@ -2505,9 +2557,9 @@ def check_order_status(broker, api, client_order_id):  # return raw dict form
         if broker == 'alpaca' or broker == 'queens_choice': #WORKERBEE remove queens_choice
             order = api.get_order_by_client_order_id(client_order_id=client_order_id)
             order = vars(order)["_raw"]
-        elif broker == 'robinhood':
-            order = api.get_order(order_id=client_order_id)
-            order = convert_robinhood_crypto_order_fields(order)
+        # elif broker == 'robinhood': # WORKERBEE HANDLE ROBINHOOD
+        #     order = api.get_order(order_id=client_order_id)
+        #     order = convert_robinhood_crypto_order_fields(order)
         return order
     except Exception as e:
         print(f"ERROR-qplcacae {client_order_id} {e}")
@@ -3365,6 +3417,11 @@ def init_pollen_dbs(db_root, prod, queens_chess_piece='queen', queenKING=False, 
     def setup_chesspiece_dbs(db_root, table_name=table_name, client_user_tables=client_user_tables):
         # print("Check to init pollen DB")
 
+        # Only use PostgreSQL if pg_migration is True
+        if not pg_migration:
+            print("Using pickle files instead of PostgreSQL")
+            return
+
         env_table = 'client_user_env'
         if not PollenDatabase.key_exists(env_table, f'{db_root}-ENV'):
             print("INIT ENV for user", db_root)
@@ -3713,7 +3770,7 @@ def order_vars__queen_order_items(
     symbol=False,
     ticker_time_frame_origin=False,
     double_down_trade=False,
-    sell_reason={},
+    sell_reason=[],
     running_close_legs=False,
     wave_at_creation={},
     assigned_wave={},
@@ -3796,7 +3853,7 @@ def order_vars__queen_order_items(
         order_vars["trigbee"] = trigbee
         order_vars["tm_trig"] = tm_trig
         order_vars["borrowed_funds"] = borrowed_funds
-        order_vars["ready_buy"] = ready_buy
+        # order_vars["ready_buy"] = ready_buy
         order_vars["borrow_qty"] = borrow_qty
         order_vars["long_short"] = long_short
 
@@ -3941,7 +3998,7 @@ def create_QueenOrderBee(
                 "wave_amo": order_vars.get("wave_amo"),
                 "sell_reason": order_vars.get("sell_reason"),
                 "borrowed_funds": order_vars.get('borrowed_funds'),
-                "ready_buy": order_vars.get('ready_buy'),
+                # "ready_buy": order_vars.get('ready_buy'),
                 "qty_order": order_vars.get('qty_order'),
                 "assigned_wave": order_vars.get("wave_at_creation"),
                 # "order": "alpaca",
@@ -4023,6 +4080,36 @@ def generate_chessboards_trading_models(chessboard):
     return tradingmodels
 
 
+def Create_TrigRule(
+                    symbol,
+                    trigrule_type='trinity', # vwap, rsi, macd, trinity..
+                    trigrule_status='active',
+                    expire_date=datetime.now().strftime('%m/%d/%YT%H:%M'), 
+                    user_accept=True, 
+                    max_order_nums=3, 
+                    max_budget=89, 
+                    marker=None, # vwap, rsi, macd, trinity..
+                    marker_value=None, #
+                    deviation_symbols=[], 
+                    deviation_group=False, 
+                    ttf=None, # Comparsion then only on TTF
+                    block_time=[] # trigging active when in block time
+                    ):
+    return {
+        "symbol": symbol,
+        "trigrule_status": trigrule_status,
+        "expire_date": expire_date,
+        "user_accept": user_accept,
+        "max_order_nums": max_order_nums,
+        "max_budget": max_budget,
+        "marker": marker,
+        "deviation_symbols": deviation_symbols,
+        "deviation_group": deviation_group,
+        "block_time": block_time,
+        "marker_value": marker_value,
+        "ttf": ttf,
+    }
+
 def return_queen_controls(stars=stars):
 
     chessboard = generate_chess_board()
@@ -4064,8 +4151,137 @@ def refresh_tickers_TradingModels(QUEEN_KING, ticker, theme='nuetral'):
     return QUEEN_KING
 
 
+def create_demo_api():
+    """Create a mock API object for demo mode."""
+    class DemoAPI:
+        def get_calendar(self):
+            """Return demo trading calendar data."""
+            from datetime import datetime, timedelta
+            import pandas as pd
+            
+            # Generate demo trading days for the next 30 days
+            demo_days = []
+            current_date = datetime.now()
+            for i in range(30):
+                date = current_date + timedelta(days=i)
+                # Skip weekends for demo
+                if date.weekday() < 5:  # Monday = 0, Friday = 4
+                    demo_days.append({
+                        'date': date.strftime('%Y-%m-%d'),
+                        'open': '09:30',
+                        'close': '16:00'
+                    })
+            
+            # Create mock objects that behave like Alpaca calendar objects
+            class MockCalendarDay:
+                def __init__(self, date, open_time, close_time):
+                    self.date = date
+                    self.open = open_time
+                    self.close = close_time
+                    self._raw = {
+                        'date': date,
+                        'open': open_time,
+                        'close': close_time
+                    }
+            
+            return [MockCalendarDay(day['date'], day['open'], day['close']) for day in demo_days]
+        
+        def list_assets(self):
+            """Return demo asset list."""
+            class MockAsset:
+                def __init__(self, symbol, status='active', tradable=True, exchange='NASDAQ'):
+                    self.symbol = symbol
+                    self.status = status
+                    self.tradable = tradable
+                    self.exchange = exchange
+                    self._raw = {
+                        'symbol': symbol,
+                        'status': status,
+                        'tradable': tradable,
+                        'exchange': exchange,
+                        'shortable': True,
+                        'easy_to_borrow': True
+                    }
+            
+            demo_symbols = ['SPY', 'QQQ', 'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'NVDA']
+            return [MockAsset(symbol) for symbol in demo_symbols]
+        
+        def get_portfolio_history(self, period='3M', timeframe='1D'):
+            """Return demo portfolio history data."""
+            import pandas as pd
+            from datetime import datetime, timedelta
+            
+            # Generate demo portfolio history data
+            end_date = datetime.now()
+            if period == '3M':
+                start_date = end_date - timedelta(days=90)
+            elif period == '1M':
+                start_date = end_date - timedelta(days=30)
+            elif period == '7D':
+                start_date = end_date - timedelta(days=7)
+            elif period == '1D':
+                start_date = end_date - timedelta(days=1)
+            else:
+                start_date = end_date - timedelta(days=90)  # Default to 3M
+            
+            # Generate demo data points
+            demo_data = []
+            current_equity = 100000  # Starting with $100k
+            base_value = current_equity
+            
+            # Generate realistic demo portfolio data
+            for i in range(30):  # 30 data points
+                date = start_date + timedelta(days=i * 3)  # Every 3 days
+                # Simulate some portfolio growth with random fluctuations
+                growth_factor = 1 + (i * 0.01) + (i % 3 - 1) * 0.005  # Slight upward trend with some volatility
+                current_equity = base_value * growth_factor
+                profit_loss = current_equity - base_value
+                profit_loss_pct = (profit_loss / base_value) * 100
+                
+                demo_data.append({
+                    'timestamp': date.strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
+                    'equity': round(current_equity, 2),
+                    'profit_loss': round(profit_loss, 2),
+                    'profit_loss_pct': round(profit_loss_pct, 2),
+                    'base_value': base_value,
+                    'base_value_asof': base_value,
+                    'timeframe': timeframe
+                })
+            
+            # Create mock object that behaves like Alpaca portfolio history
+            class MockPortfolioHistory:
+                def __init__(self, data):
+                    self._raw = data
+            
+            return MockPortfolioHistory(demo_data)
+    
+    return DemoAPI()
+
 def return_Ticker_Universe():  # Return Ticker and Acct Info
-    api = return_alpaca_api_keys(prod=False)["api"]
+    try:
+        api = return_alpaca_api_keys(prod=False)["api"]
+    except Exception as e:
+        print(f"Warning: Could not connect to Alpaca API: {e}")
+        print("Using demo mode with limited ticker data...")
+        
+        # Create demo data that matches the expected structure
+        demo_api = create_demo_api()
+        all_alpaca_tickers = demo_api.list_assets()
+        
+        # Create alpaca_symbols_dict in the same format as real API
+        alpaca_symbols_dict = {}
+        for ticker in all_alpaca_tickers:
+            alpaca_symbols_dict[ticker.symbol] = vars(ticker)
+        
+        alpaca_symbols = {k: i['_raw'] for k, i in alpaca_symbols_dict.items()}
+        alpaca_symbols_df = pd.DataFrame(alpaca_symbols).T
+        
+        # Return demo ticker universe matching the real API structure
+        return {
+            "alpaca_symbols_dict": alpaca_symbols_dict,
+            "all_alpaca_tickers": all_alpaca_tickers,
+            "alpaca_symbols_df": alpaca_symbols_df,
+        }
     # Initiate Code File Creation
     index_list = [
         "DJA",
