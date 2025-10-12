@@ -171,6 +171,7 @@ def kingdom__grace_to_find_a_Queen(prod=True):
     try:
         if pg_migration:
             table_name = 'db' if prod else 'db_sandbox'
+            print(f"Retrieving KING from table: {table_name}")
             KING = PollenDatabase.retrieve_data(table_name, 'KING')
         # create list for userdb
         else:
@@ -182,14 +183,36 @@ def kingdom__grace_to_find_a_Queen(prod=True):
     # Handle case where KING is None or doesn't have expected structure
     if KING is None or not isinstance(KING, dict):
         print("Warning: KING data is None or invalid, initializing default structure")
-        KING = {
-            'users': {
-                'not_allowed': []
-            }
-        }
+        KING = init_KING()  # Use the proper initialization function
+        # Save the newly initialized KING data
+        if pg_migration:
+            table_name = 'db' if prod else 'db_sandbox'
+            PollenDatabase.upsert_data(table_name, 'KING', KING)
+            print(f"KING data saved to table: {table_name}")
     elif 'users' not in KING:
         print("Warning: KING missing 'users' key, initializing")
         KING['users'] = {'not_allowed': []}
+    
+    # Ensure all required keys are present
+    required_keys = ['star_times', 'alpaca_symbols_df', 'alpaca_symbols_dict', 'active_order_state_list']
+    missing_keys = [key for key in required_keys if key not in KING]
+    
+    if missing_keys:
+        print(f"Warning: KING missing keys: {missing_keys}, reinitializing...")
+        # Reinitialize KING with proper structure
+        KING = init_KING()
+        # Save the newly initialized KING data
+        if pg_migration:
+            table_name = 'db' if prod else 'db_sandbox'
+            PollenDatabase.upsert_data(table_name, 'KING', KING)
+            print(f"KING data saved to table: {table_name}")
+    
+    # Ensure KING data is properly saved and retrieved
+    if pg_migration:
+        table_name = 'db' if prod else 'db_sandbox'
+        # Force save the KING data to ensure it's persisted
+        PollenDatabase.upsert_data(table_name, 'KING', KING)
+        print(f"KING data ensured in table: {table_name}")
     
     if 'not_allowed' not in KING['users'].keys():
         KING['users']['not_allowed'] = []
@@ -511,7 +534,7 @@ def init_qcp_workerbees(init_macd_vars={"fast": 12, "slow": 26, "smooth": 9},
 def setup_chess_board(QUEEN, qcp_bees_key='workerbees', screen='screen_1'):
     if qcp_bees_key not in QUEEN.keys():
         QUEEN[qcp_bees_key] = {}
-    db = init_swarm_dbs(prod=True)
+    db = init_swarm_dbs(prod=False)
     
     if pg_migration:
         BISHOP = read_swarm_db(True, 'BISHOP')
@@ -3191,7 +3214,13 @@ def pollen_themes(
     # wave_periods = {'morning_9-11': .01, 'lunch_11-2': .01, 'afternoon_2-4': .01, 'Day': .01, 'afterhours': .01}
 
     # star__storywave: auto_adjusting_with_starwave: using story
-    star_times = KING["star_times"]
+    # Handle missing star_times with fallback
+    if "star_times" in KING and KING["star_times"]:
+        star_times = KING["star_times"]
+    else:
+        print("Warning: star_times not found in KING, using fallback")
+        star_times = stars()  # Use the default stars function
+    
     pollen_themes = {}
     for theme in themes:
         pollen_themes[theme] = {}
@@ -3244,7 +3273,19 @@ def update_king_users(KING, init=False, users_allowed_queen_email=["stefanstapin
 
 def init_KING():
     king = {}
-    ticker_universe = return_Ticker_Universe()
+    
+    # Try to get ticker universe, with fallback if it fails
+    try:
+        ticker_universe = return_Ticker_Universe()
+        king['alpaca_symbols_dict'] = ticker_universe.get('alpaca_symbols_dict', {})
+        king['alpaca_symbols_df'] = ticker_universe.get('alpaca_symbols_df', pd.DataFrame())
+    except Exception as e:
+        print(f"Warning: Could not load ticker universe: {e}")
+        print("Creating minimal ticker universe...")
+        # Create minimal ticker universe with common symbols including crypto
+        minimal_symbols = ['SPY', 'QQQ', 'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'NVDA', 'META', 'NFLX', 'BTC/USD', 'ETH/USD']
+        king['alpaca_symbols_dict'] = {symbol: {'symbol': symbol, 'exchange': 'NASDAQ' if '/' not in symbol else 'CRYPTO'} for symbol in minimal_symbols}
+        king['alpaca_symbols_df'] = pd.DataFrame(index=minimal_symbols)
     
     trigbees = ["buy_cross-0", "sell_cross-0"]
     waveBlocktimes = [
@@ -3256,12 +3297,23 @@ def init_KING():
         "Day",
     ]
 
-    king["star_times"] = stars()
+    # Ensure star_times is properly set
+    try:
+        king["star_times"] = stars()
+    except Exception as e:
+        print(f"Warning: Could not initialize star_times: {e}")
+        king["star_times"] = {
+            "1Minute_1Day": 1,
+            "5Minute_5Day": 5,
+            "30Minute_1Month": 18,
+            "1Hour_3Month": 58,
+            "2Hour_6Month": 115,
+            "1Day_1Year": 250,
+        }
+    
     king["waveBlocktimes"] = waveBlocktimes
     king["trigbees"] = trigbees
     king = update_king_users(KING=king, init=True)
-    king['alpaca_symbols_dict'] = ticker_universe.get('alpaca_symbols_dict')
-    king['alpaca_symbols_df'] = ticker_universe.get('alpaca_symbols_df')
     king['active_order_state_list'] = ['running', 'running_close', 'submitted', 'error', 'pending', 'completed', 'completed_alpaca', 'running_open', 'archived_bee']
 
     return king
@@ -3350,7 +3402,7 @@ def read_swarm_db(prod=False, key='BISHOP'):
     table_name = 'db' if prod else 'db_sandbox'
     return PollenDatabase.retrieve_data(table_name, key)
 
-def init_swarm_dbs(prod, init=False, pg_migration=False, dbs=['KING', 'QUEEN', 'BISHOP', 'KNIGHT']):
+def init_swarm_dbs(prod, init=True, pg_migration=True, dbs=['KING', 'QUEEN', 'BISHOP', 'KNIGHT']):
 
     table_name = 'db' if prod else 'db_sandbox'
 
@@ -3358,21 +3410,40 @@ def init_swarm_dbs(prod, init=False, pg_migration=False, dbs=['KING', 'QUEEN', '
         for key in dbs:
             if key == 'KING':
                 if not PollenDatabase.key_exists(table_name, key):
+                    print("Initializing KING data...")
                     data = init_KING()
-                    PollenDatabase.upsert_data(table_name, key, data) 
+                    PollenDatabase.upsert_data(table_name, key, data)
+                    print("KING data saved to database")
+                else:
+                    print("KING data already exists in database") 
             if key == 'QUEEN':
                 if not PollenDatabase.key_exists(table_name, key):
                     data = init_queen('queen')
                     PollenDatabase.upsert_data(table_name, key, data) 
             if key == 'BISHOP':
                 if not PollenDatabase.key_exists(table_name, key):
-                    db = init_swarm_dbs(prod)
-                    BISHOP = ReadPickleData(db.get('BISHOP'))
-                    PollenDatabase.upsert_data(table_name, key, BISHOP) 
+                    # Fix recursion: Don't call init_swarm_dbs from within setup_swarm_dbs
+                    # Instead, initialize BISHOP directly or use a different approach
+                    try:
+                        # Try to read existing BISHOP data first
+                        BISHOP = ReadPickleData(os.path.join(hive_master_root(), 'db', f'bishop{"_sandbox" if not prod else ""}.pkl'))
+                        PollenDatabase.upsert_data(table_name, key, BISHOP)
+                    except Exception as e:
+                        print(f"Could not load BISHOP data: {e}")
+                        print("Creating empty BISHOP structure...")
+                        # If no existing data or pandas compatibility issues, create empty BISHOP structure
+                        BISHOP = {}
+                        PollenDatabase.upsert_data(table_name, key, BISHOP) 
             if key == 'KNIGHT':
                 if not PollenDatabase.key_exists(table_name, key):
                     data = {}
-                    PollenDatabase.upsert_data(table_name, key, data) 
+                    PollenDatabase.upsert_data(table_name, key, data)
+            
+            # Add whalewisdom fallback
+            if not PollenDatabase.key_exists(table_name, 'whalewisdom'):
+                print("Initializing whalewisdom with empty data...")
+                whalewisdom_data = {'latest_filer_holdings': pd.DataFrame()}
+                PollenDatabase.upsert_data(table_name, 'whalewisdom', whalewisdom_data) 
 
     if pg_migration:
         if init:

@@ -1172,7 +1172,9 @@ def queen_workerbees(
     def queens_court__WorkerBees(QUEENBEE, prod, qcp_s, run_all_pawns=False, streamit=False, reset_only=reset_only):
 
         if type(qcp_s) == str:
-            qcp_s = [qcp_s]
+            # qcp_s = [qcp_s]
+            # Handle comma-separated strings like "castle,bishop,knight"
+            qcp_s = [piece.strip() for piece in qcp_s.split(',')]
         queens_chess_pieces = qcp_s # pq.get("queens_chess_pieces")
 
         def confirm_tickers_available(alpaca_symbols_dict, symbols):
