@@ -1272,12 +1272,12 @@ def queen_workerbees(
             list_of_lists = [i.get('tickers') for qcp, i in QUEENBEE['workerbees'].items()]
             all_symbols = [item for sublist in list_of_lists for item in sublist]
             # ipdb.set_trace()
-            df_tickers = init_queenbee(client_user='stefanstapinski@gmail.com', prod=True, revrec=True, pg_migration=True)['revrec'].get('df_ticker')
+            # df_tickers = init_queenbee(client_user='stefanstapinski@gmail.com', prod=True, revrec=True, pg_migration=True)['revrec'].get('df_ticker')
             tickers_to_add = []
-            for ticker in df_tickers.index:
-                if ticker not in all_symbols and df_tickers.loc[ticker, 'ticker_buying_power'] > 0:
-                    # print(ticker, "NOT IN QUEENBEE adding to Castle")
-                    tickers_to_add.append(ticker)
+            # for ticker in df_tickers.index:
+            #     if ticker not in all_symbols and df_tickers.loc[ticker, 'ticker_buying_power'] > 0:
+            #         # print(ticker, "NOT IN QUEENBEE adding to Castle")
+            #         tickers_to_add.append(ticker)
 
             new_symbols = [i for i in tickers_to_add if i not in all_symbols] # and i not in all_values
             for i in new_symbols:
